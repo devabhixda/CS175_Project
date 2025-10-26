@@ -7,21 +7,27 @@ import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.Toast;
 
-import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-
-import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -45,8 +51,9 @@ public class MainActivity extends AppCompatActivity {
 
     private RecyclerView messagesRecyclerView;
     private EditText messageInput;
-    private FloatingActionButton micButton;
-    private FloatingActionButton sendButton;
+    private ImageButton micButton;
+    private ImageButton sendButton;
+    private View emptyStateView;
 
     private MessageAdapter messageAdapter;
     private LinearLayoutManager layoutManager;
@@ -59,15 +66,55 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
-        setContentView(R.layout.activity_main);
+    super.onCreate(savedInstanceState);
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
+    // Draw behind system bars and apply insets manually
+    WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+    setContentView(R.layout.activity_main);
+
+    // Set up toolbar
+    Toolbar toolbar = findViewById(R.id.toolbar);
+    setSupportActionBar(toolbar);
+
+    View rootView = findViewById(R.id.main);
+    View inputContainer = findViewById(R.id.inputContainer);
+
+    final ViewGroup.MarginLayoutParams toolbarLayoutParams =
+        (ViewGroup.MarginLayoutParams) toolbar.getLayoutParams();
+    final int defaultToolbarTopMargin = toolbarLayoutParams.topMargin;
+
+    final ViewGroup.MarginLayoutParams inputLayoutParams =
+        (ViewGroup.MarginLayoutParams) inputContainer.getLayoutParams();
+    final int defaultInputBottomMargin = inputLayoutParams.bottomMargin;
+
+    WindowInsetsControllerCompat insetsController =
+        WindowCompat.getInsetsController(getWindow(), rootView);
+    if (insetsController != null) {
+        insetsController.show(WindowInsetsCompat.Type.systemBars());
+        insetsController.setAppearanceLightStatusBars(true);
+    }
+
+    ViewCompat.setOnApplyWindowInsetsListener(rootView, (view, windowInsets) -> {
+        Insets statusBars = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars());
+        Insets navigationBars = windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars());
+        boolean imeVisible = windowInsets.isVisible(WindowInsetsCompat.Type.ime());
+        Insets imeInsets = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+
+        int bottomInset = navigationBars.bottom;
+        if (imeVisible) {
+        bottomInset = Math.max(bottomInset, imeInsets.bottom);
+        }
+
+        toolbarLayoutParams.topMargin = defaultToolbarTopMargin + statusBars.top;
+        toolbar.setLayoutParams(toolbarLayoutParams);
+
+        inputLayoutParams.bottomMargin = defaultInputBottomMargin + bottomInset;
+        inputContainer.setLayoutParams(inputLayoutParams);
+
+        return windowInsets;
+    });
 
         // Initialize executor service for background tasks
         executorService = Executors.newSingleThreadExecutor();
@@ -77,12 +124,16 @@ public class MainActivity extends AppCompatActivity {
         messageInput = findViewById(R.id.messageInput);
         micButton = findViewById(R.id.micButton);
         sendButton = findViewById(R.id.sendButton);
+        emptyStateView = findViewById(R.id.emptyStateView);
 
         // Set up RecyclerView
         messageAdapter = new MessageAdapter();
         layoutManager = new LinearLayoutManager(this);
         messagesRecyclerView.setLayoutManager(layoutManager);
         messagesRecyclerView.setAdapter(messageAdapter);
+
+        // Update empty state visibility
+        updateEmptyState();
 
         // Set up button listeners
         micButton.setOnClickListener(v -> handleMicButtonClick());
@@ -221,6 +272,30 @@ public class MainActivity extends AppCompatActivity {
         speechRecognizer.stopListening();
     }
 
+    private void updateEmptyState() {
+        if (messageAdapter.getItemCount() == 0) {
+            emptyStateView.setVisibility(View.VISIBLE);
+        } else {
+            emptyStateView.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.menu_main, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_clear_all) {
+            messageAdapter.clearAll();
+            updateEmptyState();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
     private void handleSendButtonClick() {
         String messageText = messageInput.getText().toString().trim();
 
@@ -233,13 +308,14 @@ public class MainActivity extends AppCompatActivity {
         Message userMessage = new Message(messageText, true);
         messageAdapter.addMessage(userMessage);
         messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+        updateEmptyState();
 
         // Clear input and disable send button
         messageInput.setText("");
         sendButton.setEnabled(false);
 
         // Add "typing" indicator
-        Message typingMessage = new Message(getString(R.string.agent_typing), false);
+        Message typingMessage = new Message("typing", false);
         messageAdapter.addMessage(typingMessage);
         messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
 

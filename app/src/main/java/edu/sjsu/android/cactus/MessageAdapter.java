@@ -15,6 +15,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
 
     private static final int VIEW_TYPE_USER = 1;
     private static final int VIEW_TYPE_AGENT = 2;
+    private static final int VIEW_TYPE_TYPING = 3;
 
     private List<Message> messages;
 
@@ -25,7 +26,13 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     @Override
     public int getItemViewType(int position) {
         Message message = messages.get(position);
-        return message.isUser() ? VIEW_TYPE_USER : VIEW_TYPE_AGENT;
+        if (message.isUser()) {
+            return VIEW_TYPE_USER;
+        } else if (message.getContent().equals("typing")) {
+            return VIEW_TYPE_TYPING;
+        } else {
+            return VIEW_TYPE_AGENT;
+        }
     }
 
     @NonNull
@@ -35,6 +42,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         if (viewType == VIEW_TYPE_USER) {
             view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_user, parent, false);
+        } else if (viewType == VIEW_TYPE_TYPING) {
+            view = LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.item_message_typing, parent, false);
         } else {
             view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_agent, parent, false);
@@ -45,7 +55,39 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     @Override
     public void onBindViewHolder(@NonNull MessageViewHolder holder, int position) {
         Message message = messages.get(position);
-        holder.messageText.setText(message.getContent());
+        if (holder.messageText != null && !message.getContent().equals("typing")) {
+            holder.messageText.setText(message.getContent());
+        }
+
+        // Start animation for typing indicator
+        if (message.getContent().equals("typing") && holder.itemView != null) {
+            View dot1 = holder.itemView.findViewById(R.id.dot1);
+            View dot2 = holder.itemView.findViewById(R.id.dot2);
+            View dot3 = holder.itemView.findViewById(R.id.dot3);
+
+            if (dot1 != null && dot2 != null && dot3 != null) {
+                animateTypingDot(dot1, 0);
+                animateTypingDot(dot2, 200);
+                animateTypingDot(dot3, 400);
+            }
+        }
+    }
+
+    private void animateTypingDot(View dot, long delay) {
+        dot.animate()
+            .scaleX(1.3f)
+            .scaleY(1.3f)
+            .setDuration(600)
+            .setStartDelay(delay)
+            .withEndAction(() -> {
+                dot.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(600)
+                    .withEndAction(() -> animateTypingDot(dot, 0))
+                    .start();
+            })
+            .start();
     }
 
     @Override
@@ -64,6 +106,12 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
             messages.remove(lastPosition);
             notifyItemRemoved(lastPosition);
         }
+    }
+
+    public void clearAll() {
+        int size = messages.size();
+        messages.clear();
+        notifyItemRangeRemoved(0, size);
     }
 
     static class MessageViewHolder extends RecyclerView.ViewHolder {
