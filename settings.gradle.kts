@@ -16,14 +16,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven {
-            name = "GitHubPackagesCactus"
-            url = uri("https://maven.pkg.github.com/cactus-compute/cactus-kotlin")
-            credentials {
-                username = System.getProperty("github.username") ?: System.getenv("GITHUB_ACTOR")
-                password = System.getProperty("github.token") ?: System.getenv("GITHUB_TOKEN")
-            }
-        }
     }
 }
 

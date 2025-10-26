@@ -1,3 +1,17 @@
 <resources>
     <string name="app_name">Cactus</string>
+    <string name="tap_microphone_prompt">Tap the microphone to start recording...</string>
+    <string name="record_audio">Record audio</string>
+    <string name="send_to_agent">Send to agent</string>
+    <string name="recording">Recording...</string>
+    <string name="processing">Processing audio...</string>
+    <string name="agent_thinking">Agent is thinking...</string>
+    <string name="permission_required">Microphone permission is required</string>
+    <string name="permission_granted">Microphone permission granted</string>
+    <string name="no_text_to_send">No text to send</string>
+    <string name="agent_response">Agent: %s</string>
+    <string name="error_speech_recognition">Speech recognition error</string>
+    <string name="error_api_call">Error calling API: %s</string>
+    <string name="message_hint">Type a message...</string>
+    <string name="agent_typing">Agent is typing...</string>
 </resources>
