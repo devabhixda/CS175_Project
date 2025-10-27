@@ -47,7 +47,7 @@ public class MainActivity extends AppCompatActivity {
 
     // OpenAI API configuration (API key is stored in local.properties)
     private static final String OPENAI_API_KEY = BuildConfig.OPENAI_API_KEY;
-    private static final String OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+    private static final String OPENAI_API_URL = "https://api.openai.com/v1/responses";
 
     private RecyclerView messagesRecyclerView;
     private EditText messageInput;
@@ -361,18 +361,11 @@ public class MainActivity extends AppCompatActivity {
         conn.setRequestProperty("Authorization", "Bearer " + OPENAI_API_KEY);
         conn.setDoOutput(true);
 
-        // Create JSON request body
+        // Create JSON request body for Responses API
         JSONObject requestBody = new JSONObject();
         requestBody.put("model", "gpt-5-nano-2025-08-07");
-
-        JSONArray messages = new JSONArray();
-        JSONObject message = new JSONObject();
-        message.put("role", "user");
-        message.put("content", userMessage);
-        messages.put(message);
-
-        requestBody.put("messages", messages);
-        requestBody.put("max_completion_tokens", 500);
+        requestBody.put("instructions", "Always respond in a friendly and helpful tone. Keep your answers concise and to the point.");
+        requestBody.put("input", userMessage);
 
         // Send request
         try (OutputStream os = conn.getOutputStream()) {
@@ -392,12 +385,50 @@ public class MainActivity extends AppCompatActivity {
             }
             in.close();
 
-            // Parse JSON response
-            JSONObject jsonResponse = new JSONObject(response.toString());
-            JSONArray choices = jsonResponse.getJSONArray("choices");
-            JSONObject firstChoice = choices.getJSONObject(0);
-            JSONObject messageObj = firstChoice.getJSONObject("message");
-            return messageObj.getString("content");
+            // Parse JSON response from Responses API
+            String responseStr = response.toString();
+            JSONObject jsonResponse = new JSONObject(responseStr);
+            
+            // The Responses API returns output array with message objects
+            if (!jsonResponse.has("output")) {
+                throw new Exception("Response missing 'output' field");
+            }
+            
+            JSONArray outputArray = jsonResponse.getJSONArray("output");
+            if (outputArray.length() == 0) {
+                throw new Exception("Empty output array");
+            }
+            
+            // Find the message type in the output array (skip reasoning)
+            for (int i = 0; i < outputArray.length(); i++) {
+                JSONObject outputItem = outputArray.getJSONObject(i);
+                String outputType = outputItem.optString("type", "");
+                
+                // Look for type "message"
+                if ("message".equals(outputType)) {
+                    // Get the content array from the message
+                    if (!outputItem.has("content")) {
+                        continue;
+                    }
+                    
+                    JSONArray contentArray = outputItem.getJSONArray("content");
+                    if (contentArray.length() == 0) {
+                        continue;
+                    }
+                    
+                    // Find output_text in content array
+                    for (int j = 0; j < contentArray.length(); j++) {
+                        JSONObject contentItem = contentArray.getJSONObject(j);
+                        String contentType = contentItem.optString("type", "");
+                        
+                        if ("output_text".equals(contentType) && contentItem.has("text")) {
+                            return contentItem.getString("text");
+                        }
+                    }
+                }
+            }
+            
+            throw new Exception("No message content found in response");
         } else {
             // Read error response
             BufferedReader errorReader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
