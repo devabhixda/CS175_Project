@@ -23,6 +23,16 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         this.messages = new ArrayList<>();
     }
 
+    public void loadMessages(List<Message> messages) {
+        this.messages.clear();
+        this.messages.addAll(messages);
+        notifyDataSetChanged();
+    }
+
+    public List<Message> getMessages() {
+        return messages;
+    }
+
     @Override
     public int getItemViewType(int position) {
         Message message = messages.get(position);

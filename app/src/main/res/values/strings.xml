@@ -14,4 +14,9 @@
     <string name="error_api_call">Error calling API: %s</string>
     <string name="message_hint">Type a message...</string>
     <string name="agent_typing">Agent is typing...</string>
+    <string name="new_chat">New Chat</string>
+    <string name="chat_history">Chat History</string>
+    <string name="nav_header_subtitle">Your AI Assistant</string>
+    <string name="open_drawer">Open navigation drawer</string>
+    <string name="close_drawer">Close navigation drawer</string>
 </resources>

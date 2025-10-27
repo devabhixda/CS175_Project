@@ -8,7 +8,6 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -17,17 +16,23 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.Toast;
 
+import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
+import androidx.core.view.GravityCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.navigation.NavigationView;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,6 +43,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -49,20 +55,28 @@ public class MainActivity extends AppCompatActivity {
     private static final String OPENAI_API_KEY = BuildConfig.OPENAI_API_KEY;
     private static final String OPENAI_API_URL = "https://api.openai.com/v1/responses";
 
+    private DrawerLayout drawerLayout;
+    private ActionBarDrawerToggle drawerToggle;
     private RecyclerView messagesRecyclerView;
+    private RecyclerView sessionsRecyclerView;
     private EditText messageInput;
     private ImageButton micButton;
     private ImageButton sendButton;
     private View emptyStateView;
+    private MaterialButton newChatButton;
 
     private MessageAdapter messageAdapter;
+    private SessionAdapter sessionAdapter;
     private LinearLayoutManager layoutManager;
+    private LinearLayoutManager sessionsLayoutManager;
+    private ChatDatabaseHelper dbHelper;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechRecognizerIntent;
     private ExecutorService executorService;
 
     private boolean isListening = false;
+    private long currentSessionId = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,11 +86,25 @@ public class MainActivity extends AppCompatActivity {
     WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-    setContentView(R.layout.activity_main);
+    setContentView(R.layout.activity_main_drawer);
+
+    // Set up drawer layout
+    drawerLayout = findViewById(R.id.drawerLayout);
 
     // Set up toolbar
     Toolbar toolbar = findViewById(R.id.toolbar);
     setSupportActionBar(toolbar);
+
+    // Set up drawer toggle
+    drawerToggle = new ActionBarDrawerToggle(
+            this,
+            drawerLayout,
+            toolbar,
+            R.string.open_drawer,
+            R.string.close_drawer
+    );
+    drawerLayout.addDrawerListener(drawerToggle);
+    drawerToggle.syncState();
 
     View rootView = findViewById(R.id.main);
     View inputContainer = findViewById(R.id.inputContainer);
@@ -119,21 +147,38 @@ public class MainActivity extends AppCompatActivity {
         // Initialize executor service for background tasks
         executorService = Executors.newSingleThreadExecutor();
 
+        // Initialize database
+        dbHelper = new ChatDatabaseHelper(this);
+
         // Initialize UI components
         messagesRecyclerView = findViewById(R.id.messagesRecyclerView);
         messageInput = findViewById(R.id.messageInput);
         micButton = findViewById(R.id.micButton);
         sendButton = findViewById(R.id.sendButton);
         emptyStateView = findViewById(R.id.emptyStateView);
+        newChatButton = findViewById(R.id.newChatButton);
+        sessionsRecyclerView = findViewById(R.id.sessionsRecyclerView);
 
-        // Set up RecyclerView
+        // Set up RecyclerView for messages
         messageAdapter = new MessageAdapter();
         layoutManager = new LinearLayoutManager(this);
         messagesRecyclerView.setLayoutManager(layoutManager);
         messagesRecyclerView.setAdapter(messageAdapter);
 
+        // Set up RecyclerView for sessions
+        sessionAdapter = new SessionAdapter(this::onSessionClick);
+        sessionsLayoutManager = new LinearLayoutManager(this);
+        sessionsRecyclerView.setLayoutManager(sessionsLayoutManager);
+        sessionsRecyclerView.setAdapter(sessionAdapter);
+
+        // Load sessions and create a new session if none exist
+        loadSessions();
+
         // Update empty state visibility
         updateEmptyState();
+
+        // Set up new chat button
+        newChatButton.setOnClickListener(v -> createNewSession());
 
         // Set up button listeners
         micButton.setOnClickListener(v -> handleMicButtonClick());
@@ -162,6 +207,93 @@ public class MainActivity extends AppCompatActivity {
                     new String[]{Manifest.permission.RECORD_AUDIO},
                     PERMISSION_REQUEST_CODE);
         }
+    }
+
+    private void loadChatHistory() {
+        if (currentSessionId == -1) {
+            return;
+        }
+
+        executorService.execute(() -> {
+            List<Message> messages = dbHelper.getMessagesForSession(currentSessionId);
+            runOnUiThread(() -> {
+                if (!messages.isEmpty()) {
+                    messageAdapter.loadMessages(messages);
+                    messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+                }
+                updateEmptyState();
+            });
+        });
+    }
+
+    private void loadSessions() {
+        executorService.execute(() -> {
+            // Clean up empty sessions before loading
+            List<ChatSession> allSessions = dbHelper.getAllSessions();
+            for (ChatSession session : allSessions) {
+                if (session.getMessageCount() == 0) {
+                    dbHelper.deleteSession(session.getId());
+                }
+            }
+            
+            // Reload sessions after cleanup
+            List<ChatSession> sessions = dbHelper.getAllSessions();
+            runOnUiThread(() -> {
+                sessionAdapter.setSessions(sessions);
+                // Always start with no active session (new chat)
+                // Session will be created when user sends first message
+            });
+        });
+    }
+
+    private void createNewSession() {
+        // Clear current messages without creating a session yet
+        currentSessionId = -1;
+        messageAdapter.clearAll();
+        updateEmptyState();
+        sessionAdapter.setSelectedSessionId(-1);
+        drawerLayout.closeDrawer(GravityCompat.START);
+    }
+
+    private void onSessionClick(ChatSession session) {
+        currentSessionId = session.getId();
+        sessionAdapter.setSelectedSessionId(currentSessionId);
+        
+        // Clear current messages
+        messageAdapter.clearAll();
+        
+        // Load messages for selected session
+        loadChatHistory();
+        
+        // Close drawer
+        drawerLayout.closeDrawer(GravityCompat.START);
+    }
+
+    private void updateSessionTitle() {
+        if (currentSessionId == -1 || messageAdapter.getItemCount() == 0) {
+            return;
+        }
+
+        executorService.execute(() -> {
+            List<Message> messages = messageAdapter.getMessages();
+            
+            // Find the first user message to use as title
+            String title = "New Chat";
+            for (Message msg : messages) {
+                if (msg.isUser() && !msg.getContent().isEmpty()) {
+                    title = msg.getContent();
+                    if (title.length() > 30) {
+                        title = title.substring(0, 30) + "...";
+                    }
+                    break;
+                }
+            }
+            
+            final String finalTitle = title;
+            dbHelper.updateSessionTitle(currentSessionId, finalTitle);
+            
+            runOnUiThread(() -> loadSessions());
+        });
     }
 
     @Override
@@ -282,18 +414,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.menu_main, menu);
         return true;
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == R.id.action_clear_all) {
-            messageAdapter.clearAll();
-            updateEmptyState();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
     }
 
     private void handleSendButtonClick() {
@@ -304,11 +425,42 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // If no session exists, create one now
+        if (currentSessionId == -1) {
+            executorService.execute(() -> {
+                String title = "New Chat";
+                long sessionId = dbHelper.createSession(title);
+                
+                runOnUiThread(() -> {
+                    currentSessionId = sessionId;
+                    sendMessage(messageText);
+                    loadSessions(); // Refresh the sessions list
+                });
+            });
+        } else {
+            sendMessage(messageText);
+        }
+    }
+
+    private void sendMessage(String messageText) {
         // Add user message to chat
         Message userMessage = new Message(messageText, true);
+        userMessage.setSessionId(currentSessionId);
         messageAdapter.addMessage(userMessage);
         messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
         updateEmptyState();
+
+        // Save user message to database
+        final boolean isFirstMessage = messageAdapter.getItemCount() == 1;
+        executorService.execute(() -> {
+            long id = dbHelper.insertMessage(userMessage);
+            userMessage.setId(id);
+            
+            // Update session title with first user message
+            if (isFirstMessage) {
+                runOnUiThread(() -> updateSessionTitle());
+            }
+        });
 
         // Clear input and disable send button
         messageInput.setText("");
@@ -331,8 +483,15 @@ public class MainActivity extends AppCompatActivity {
 
                     // Add agent response
                     Message agentMessage = new Message(response, false);
+                    agentMessage.setSessionId(currentSessionId);
                     messageAdapter.addMessage(agentMessage);
                     messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+
+                    // Save agent message to database
+                    executorService.execute(() -> {
+                        long id = dbHelper.insertMessage(agentMessage);
+                        agentMessage.setId(id);
+                    });
 
                     sendButton.setEnabled(true);
                 });
@@ -344,8 +503,15 @@ public class MainActivity extends AppCompatActivity {
 
                     // Add error message
                     Message errorMessage = new Message(getString(R.string.error_api_call, e.getMessage()), false);
+                    errorMessage.setSessionId(currentSessionId);
                     messageAdapter.addMessage(errorMessage);
                     messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+
+                    // Save error message to database
+                    executorService.execute(() -> {
+                        long id = dbHelper.insertMessage(errorMessage);
+                        errorMessage.setId(id);
+                    });
 
                     sendButton.setEnabled(true);
                 });
@@ -454,6 +620,19 @@ public class MainActivity extends AppCompatActivity {
             speechRecognizer.destroy();
         }
 
+        if (dbHelper != null) {
+            dbHelper.close();
+        }
+
         executorService.shutdown();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START);
+        } else {
+            super.onBackPressed();
+        }
     }
 }
