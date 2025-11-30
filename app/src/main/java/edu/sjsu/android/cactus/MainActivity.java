@@ -53,7 +53,10 @@ public class MainActivity extends AppCompatActivity {
 
     // OpenAI API configuration (API key is stored in local.properties)
     private static final String OPENAI_API_KEY = BuildConfig.OPENAI_API_KEY;
-    private static final String OPENAI_API_URL = "https://api.openai.com/v1/responses";
+    private static final String OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+
+    // Tools
+    private final List<BaseTool> availableTools = new ArrayList<>();
 
     private DrawerLayout drawerLayout;
     private ActionBarDrawerToggle drawerToggle;
@@ -149,6 +152,22 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize database
         dbHelper = new ChatDatabaseHelper(this);
+
+        // Initialize tools
+        initializeTools();
+
+        // Set up back press handling
+        getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                    drawerLayout.closeDrawer(GravityCompat.START);
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                }
+            }
+        });
 
         // Initialize UI components
         messagesRecyclerView = findViewById(R.id.messagesRecyclerView);
@@ -481,8 +500,11 @@ public class MainActivity extends AppCompatActivity {
                     // Remove typing indicator
                     messageAdapter.removeLastMessage();
 
-                    // Add agent response
-                    Message agentMessage = new Message(response, false);
+                    // Add agent response (ensure it's not null or empty)
+                    String responseText = response != null && !response.trim().isEmpty()
+                        ? response
+                        : "I completed the action.";
+                    Message agentMessage = new Message(responseText, false);
                     agentMessage.setSessionId(currentSessionId);
                     messageAdapter.addMessage(agentMessage);
                     messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
@@ -519,19 +541,178 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * Initialize available tools
+     */
+    private void initializeTools() {
+        availableTools.add(new AlarmTool(this));
+        availableTools.add(new PhoneCallTool(this));
+    }
+
+    /**
+     * Build conversation history for the API
+     */
+    private JSONArray buildConversationHistory() throws Exception {
+        JSONArray messages = new JSONArray();
+
+        // Add system message
+        JSONObject systemMessage = new JSONObject();
+        systemMessage.put("role", "system");
+        systemMessage.put("content", "You are a helpful assistant. Always respond in a friendly and helpful tone. Keep your answers concise and to the point. You have access to tools for setting alarms and making phone calls on the device.");
+        messages.put(systemMessage);
+
+        // Add conversation history from the current session
+        List<Message> history = messageAdapter.getMessages();
+        for (Message msg : history) {
+            // Skip typing indicators and tool messages
+            if (msg.getContent().equals("typing") || msg.getMessageType() == Message.TYPE_TOOL) {
+                continue;
+            }
+
+            // Skip messages with null or empty content
+            String content = msg.getContent();
+            if (content == null || content.trim().isEmpty()) {
+                continue;
+            }
+
+            JSONObject messageObj = new JSONObject();
+            messageObj.put("role", msg.isUser() ? "user" : "assistant");
+            messageObj.put("content", content);
+            messages.put(messageObj);
+        }
+
+        return messages;
+    }
+
+    /**
+     * Call OpenAI Chat Completions API with function calling
+     */
     private String callOpenAI(String userMessage) throws Exception {
+        JSONArray messages = buildConversationHistory();
+
+        // Make initial API call
+        JSONObject response = callChatCompletionsAPI(messages);
+
+        // Check if response contains tool calls
+        JSONArray choices = response.getJSONArray("choices");
+        if (choices.length() == 0) {
+            throw new Exception("No choices in response");
+        }
+
+        JSONObject choice = choices.getJSONObject(0);
+        JSONObject message = choice.getJSONObject("message");
+
+        // Check for tool calls
+        if (message.has("tool_calls")) {
+            JSONArray toolCalls = message.getJSONArray("tool_calls");
+            return handleToolCalls(messages, message, toolCalls);
+        }
+
+        // No tool calls, return the response directly
+        return message.optString("content", "");
+    }
+
+    /**
+     * Handle tool calls and get final response
+     */
+    private String handleToolCalls(JSONArray messages, JSONObject assistantMessage, JSONArray toolCalls) throws Exception {
+        // Add assistant message with tool calls to history
+        messages.put(assistantMessage);
+
+        // Execute each tool call
+        for (int i = 0; i < toolCalls.length(); i++) {
+            JSONObject toolCallObj = toolCalls.getJSONObject(i);
+            String toolCallId = toolCallObj.getString("id");
+            JSONObject function = toolCallObj.getJSONObject("function");
+            String functionName = function.getString("name");
+            JSONObject arguments = new JSONObject(function.getString("arguments"));
+
+            // Show tool execution in UI
+            final String toolName = functionName;
+            final String toolArgs = arguments.toString();
+            runOnUiThread(() -> {
+                Message toolMessage = new Message("🔧 Using " + toolName + "...", Message.TYPE_TOOL);
+                toolMessage.setSessionId(currentSessionId);
+                messageAdapter.addMessage(toolMessage);
+                messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+            });
+
+            // Execute the tool
+            ToolResult toolResult = executeTool(functionName, arguments);
+
+            // Get the content (result or error message)
+            String toolContent = toolResult.isSuccess()
+                ? toolResult.getResult()
+                : toolResult.getError();
+
+            // Ensure content is never null
+            if (toolContent == null || toolContent.trim().isEmpty()) {
+                toolContent = "Tool execution completed with no output.";
+            }
+
+            // Add tool result to messages
+            JSONObject toolResultMessage = new JSONObject();
+            toolResultMessage.put("role", "tool");
+            toolResultMessage.put("tool_call_id", toolCallId);
+            toolResultMessage.put("content", toolContent);
+            messages.put(toolResultMessage);
+
+            // Remove tool execution message from UI
+            runOnUiThread(() -> {
+                messageAdapter.removeLastMessage();
+            });
+        }
+
+        // Make another API call with tool results
+        JSONObject finalResponse = callChatCompletionsAPI(messages);
+        JSONArray choices = finalResponse.getJSONArray("choices");
+        if (choices.length() == 0) {
+            throw new Exception("No choices in final response");
+        }
+
+        JSONObject choice = choices.getJSONObject(0);
+        JSONObject message = choice.getJSONObject("message");
+
+        return message.optString("content", "");
+    }
+
+    /**
+     * Execute a tool by name
+     */
+    private ToolResult executeTool(String toolName, JSONObject arguments) {
+        for (BaseTool tool : availableTools) {
+            if (tool.getName().equals(toolName)) {
+                return tool.execute(arguments);
+            }
+        }
+        return new ToolResult("", "Unknown tool: " + toolName);
+    }
+
+    /**
+     * Call OpenAI Chat Completions API
+     */
+    private JSONObject callChatCompletionsAPI(JSONArray messages) throws Exception {
         URL url = new URL(OPENAI_API_URL);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("Authorization", "Bearer " + OPENAI_API_KEY);
         conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(30000);
 
-        // Create JSON request body for Responses API
+        // Create JSON request body for Chat Completions API
         JSONObject requestBody = new JSONObject();
-        requestBody.put("model", "gpt-5-nano-2025-08-07");
-        requestBody.put("instructions", "Always respond in a friendly and helpful tone. Keep your answers concise and to the point.");
-        requestBody.put("input", userMessage);
+        requestBody.put("model", "gpt-4o-mini");
+        requestBody.put("messages", messages);
+
+        // Add function definitions
+        JSONArray tools = new JSONArray();
+        for (BaseTool tool : availableTools) {
+            tools.put(tool.getFunctionDefinition());
+        }
+        requestBody.put("tools", tools);
+        requestBody.put("tool_choice", "auto");
 
         // Send request
         try (OutputStream os = conn.getOutputStream()) {
@@ -551,50 +732,7 @@ public class MainActivity extends AppCompatActivity {
             }
             in.close();
 
-            // Parse JSON response from Responses API
-            String responseStr = response.toString();
-            JSONObject jsonResponse = new JSONObject(responseStr);
-            
-            // The Responses API returns output array with message objects
-            if (!jsonResponse.has("output")) {
-                throw new Exception("Response missing 'output' field");
-            }
-            
-            JSONArray outputArray = jsonResponse.getJSONArray("output");
-            if (outputArray.length() == 0) {
-                throw new Exception("Empty output array");
-            }
-            
-            // Find the message type in the output array (skip reasoning)
-            for (int i = 0; i < outputArray.length(); i++) {
-                JSONObject outputItem = outputArray.getJSONObject(i);
-                String outputType = outputItem.optString("type", "");
-                
-                // Look for type "message"
-                if ("message".equals(outputType)) {
-                    // Get the content array from the message
-                    if (!outputItem.has("content")) {
-                        continue;
-                    }
-                    
-                    JSONArray contentArray = outputItem.getJSONArray("content");
-                    if (contentArray.length() == 0) {
-                        continue;
-                    }
-                    
-                    // Find output_text in content array
-                    for (int j = 0; j < contentArray.length(); j++) {
-                        JSONObject contentItem = contentArray.getJSONObject(j);
-                        String contentType = contentItem.optString("type", "");
-                        
-                        if ("output_text".equals(contentType) && contentItem.has("text")) {
-                            return contentItem.getString("text");
-                        }
-                    }
-                }
-            }
-            
-            throw new Exception("No message content found in response");
+            return new JSONObject(response.toString());
         } else {
             // Read error response
             BufferedReader errorReader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
@@ -627,12 +765,4 @@ public class MainActivity extends AppCompatActivity {
         executorService.shutdown();
     }
 
-    @Override
-    public void onBackPressed() {
-        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START);
-        } else {
-            super.onBackPressed();
-        }
-    }
 }
