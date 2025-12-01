@@ -3,6 +3,7 @@ package edu.sjsu.android.cactus;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -16,8 +17,10 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     private static final int VIEW_TYPE_USER = 1;
     private static final int VIEW_TYPE_AGENT = 2;
     private static final int VIEW_TYPE_TYPING = 3;
+    private static final int VIEW_TYPE_TOOL_CONFIRMATION = 4;
 
     private List<Message> messages;
+    private ToolConfirmationListener confirmationListener;
 
     public MessageAdapter() {
         this.messages = new ArrayList<>();
@@ -40,6 +43,8 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
             return VIEW_TYPE_USER;
         } else if (message.getContent().equals("typing")) {
             return VIEW_TYPE_TYPING;
+        } else if (message.getMessageType() == Message.TYPE_TOOL_CONFIRMATION) {
+            return VIEW_TYPE_TOOL_CONFIRMATION;
         } else {
             return VIEW_TYPE_AGENT;
         }
@@ -55,6 +60,9 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         } else if (viewType == VIEW_TYPE_TYPING) {
             view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_typing, parent, false);
+        } else if (viewType == VIEW_TYPE_TOOL_CONFIRMATION) {
+            view = LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.item_message_tool_confirmation, parent, false);
         } else {
             view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_agent, parent, false);
@@ -65,7 +73,24 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     @Override
     public void onBindViewHolder(@NonNull MessageViewHolder holder, int position) {
         Message message = messages.get(position);
-        if (holder.messageText != null && !message.getContent().equals("typing")) {
+
+        // Handle tool confirmation messages
+        if (message.getMessageType() == Message.TYPE_TOOL_CONFIRMATION) {
+            if (holder.toolConfirmationText != null) {
+                holder.toolConfirmationText.setText(message.getContent());
+            }
+
+            // Set up button click listeners
+            if (holder.btnYes != null && holder.btnNo != null && confirmationListener != null) {
+                holder.btnYes.setOnClickListener(v -> {
+                    confirmationListener.onToolConfirmed(message, position);
+                });
+
+                holder.btnNo.setOnClickListener(v -> {
+                    confirmationListener.onToolRejected(message, position);
+                });
+            }
+        } else if (holder.messageText != null && !message.getContent().equals("typing")) {
             holder.messageText.setText(message.getContent());
         }
 
@@ -124,12 +149,27 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
         notifyItemRangeRemoved(0, size);
     }
 
+    public void setToolConfirmationListener(ToolConfirmationListener listener) {
+        this.confirmationListener = listener;
+    }
+
+    public interface ToolConfirmationListener {
+        void onToolConfirmed(Message message, int position);
+        void onToolRejected(Message message, int position);
+    }
+
     static class MessageViewHolder extends RecyclerView.ViewHolder {
         TextView messageText;
+        TextView toolConfirmationText;
+        Button btnYes;
+        Button btnNo;
 
         public MessageViewHolder(@NonNull View itemView) {
             super(itemView);
             messageText = itemView.findViewById(R.id.messageText);
+            toolConfirmationText = itemView.findViewById(R.id.toolConfirmationText);
+            btnYes = itemView.findViewById(R.id.btnYes);
+            btnNo = itemView.findViewById(R.id.btnNo);
         }
     }
 }

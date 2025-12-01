@@ -4,6 +4,7 @@ public class Message {
     public static final int TYPE_USER = 0;
     public static final int TYPE_AGENT = 1;
     public static final int TYPE_TOOL = 2;
+    public static final int TYPE_TOOL_CONFIRMATION = 3;
 
     private long id;
     private long sessionId;
@@ -11,6 +12,7 @@ public class Message {
     private boolean isUser;
     private long timestamp;
     private int messageType; // Not persisted to DB, used for UI display only
+    private Object toolCallData; // Store tool call data for confirmation messages
 
     public Message(String content, boolean isUser) {
         this.content = content;
@@ -73,5 +75,13 @@ public class Message {
 
     public void setMessageType(int messageType) {
         this.messageType = messageType;
+    }
+
+    public Object getToolCallData() {
+        return toolCallData;
+    }
+
+    public void setToolCallData(Object toolCallData) {
+        this.toolCallData = toolCallData;
     }
 }

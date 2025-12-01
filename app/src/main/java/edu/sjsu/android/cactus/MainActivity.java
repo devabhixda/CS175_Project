@@ -81,6 +81,11 @@ public class MainActivity extends AppCompatActivity {
     private boolean isListening = false;
     private long currentSessionId = -1;
 
+    // Pending tool calls storage
+    private JSONArray pendingMessages;
+    private JSONObject pendingAssistantMessage;
+    private JSONArray pendingToolCalls;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -183,6 +188,19 @@ public class MainActivity extends AppCompatActivity {
         layoutManager = new LinearLayoutManager(this);
         messagesRecyclerView.setLayoutManager(layoutManager);
         messagesRecyclerView.setAdapter(messageAdapter);
+
+        // Set up tool confirmation listener
+        messageAdapter.setToolConfirmationListener(new MessageAdapter.ToolConfirmationListener() {
+            @Override
+            public void onToolConfirmed(Message message, int position) {
+                handleToolConfirmation(message, position, true);
+            }
+
+            @Override
+            public void onToolRejected(Message message, int position) {
+                handleToolConfirmation(message, position, false);
+            }
+        });
 
         // Set up RecyclerView for sessions
         sessionAdapter = new SessionAdapter(this::onSessionClick);
@@ -616,64 +634,180 @@ public class MainActivity extends AppCompatActivity {
      * Handle tool calls and get final response
      */
     private String handleToolCalls(JSONArray messages, JSONObject assistantMessage, JSONArray toolCalls) throws Exception {
-        // Add assistant message with tool calls to history
-        messages.put(assistantMessage);
+        // Store pending tool calls for confirmation
+        pendingMessages = messages;
+        pendingAssistantMessage = assistantMessage;
+        pendingToolCalls = toolCalls;
 
-        // Execute each tool call
-        for (int i = 0; i < toolCalls.length(); i++) {
-            JSONObject toolCallObj = toolCalls.getJSONObject(i);
-            String toolCallId = toolCallObj.getString("id");
-            JSONObject function = toolCallObj.getJSONObject("function");
-            String functionName = function.getString("name");
-            JSONObject arguments = new JSONObject(function.getString("arguments"));
+        // Show confirmation UI for the first tool call
+        JSONObject toolCallObj = toolCalls.getJSONObject(0);
+        JSONObject function = toolCallObj.getJSONObject("function");
+        String functionName = function.getString("name");
+        JSONObject arguments = new JSONObject(function.getString("arguments"));
 
-            // Show tool execution in UI
-            final String toolName = functionName;
-            final String toolArgs = arguments.toString();
-            runOnUiThread(() -> {
-                Message toolMessage = new Message("🔧 Using " + toolName + "...", Message.TYPE_TOOL);
-                toolMessage.setSessionId(currentSessionId);
-                messageAdapter.addMessage(toolMessage);
-                messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
-            });
+        // Format the confirmation message
+        final String confirmationText = formatToolConfirmation(functionName, arguments);
 
-            // Execute the tool
-            ToolResult toolResult = executeTool(functionName, arguments);
+        runOnUiThread(() -> {
+            // Remove typing indicator first
+            messageAdapter.removeLastMessage();
 
-            // Get the content (result or error message)
-            String toolContent = toolResult.isSuccess()
-                ? toolResult.getResult()
-                : toolResult.getError();
+            // Add tool confirmation message
+            Message confirmMessage = new Message(confirmationText, Message.TYPE_TOOL_CONFIRMATION);
+            confirmMessage.setSessionId(currentSessionId);
+            confirmMessage.setToolCallData(toolCallObj);
+            messageAdapter.addMessage(confirmMessage);
+            messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+        });
 
-            // Ensure content is never null
-            if (toolContent == null || toolContent.trim().isEmpty()) {
-                toolContent = "Tool execution completed with no output.";
+        // Return empty string to indicate we're waiting for confirmation
+        // The actual response will be handled in handleToolConfirmation
+        return "";
+    }
+
+    /**
+     * Format tool call information for confirmation message
+     */
+    private String formatToolConfirmation(String functionName, JSONObject arguments) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("I want to use: ").append(functionName).append("\n\n");
+
+        try {
+            JSONArray names = arguments.names();
+            if (names != null && names.length() > 0) {
+                sb.append("Parameters:\n");
+                for (int i = 0; i < names.length(); i++) {
+                    String key = names.getString(i);
+                    String value = arguments.get(key).toString();
+                    sb.append("• ").append(key).append(": ").append(value).append("\n");
+                }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
-            // Add tool result to messages
-            JSONObject toolResultMessage = new JSONObject();
-            toolResultMessage.put("role", "tool");
-            toolResultMessage.put("tool_call_id", toolCallId);
-            toolResultMessage.put("content", toolContent);
-            messages.put(toolResultMessage);
+        sb.append("\nDo you want to proceed?");
+        return sb.toString();
+    }
 
-            // Remove tool execution message from UI
-            runOnUiThread(() -> {
-                messageAdapter.removeLastMessage();
+    /**
+     * Handle tool confirmation (Yes/No button click)
+     */
+    private void handleToolConfirmation(Message message, int position, boolean confirmed) {
+        // Remove the confirmation message
+        messageAdapter.removeLastMessage();
+
+        if (!confirmed) {
+            // User rejected the tool call
+            Message rejectionMessage = new Message("Tool call cancelled.", false);
+            rejectionMessage.setSessionId(currentSessionId);
+            messageAdapter.addMessage(rejectionMessage);
+            messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+
+            // Save rejection message to database
+            executorService.execute(() -> {
+                long id = dbHelper.insertMessage(rejectionMessage);
+                rejectionMessage.setId(id);
             });
+
+            sendButton.setEnabled(true);
+            return;
         }
 
-        // Make another API call with tool results
-        JSONObject finalResponse = callChatCompletionsAPI(messages);
-        JSONArray choices = finalResponse.getJSONArray("choices");
-        if (choices.length() == 0) {
-            throw new Exception("No choices in final response");
-        }
+        // User confirmed - execute the tool calls
+        executorService.execute(() -> {
+            try {
+                // Add assistant message with tool calls to history
+                pendingMessages.put(pendingAssistantMessage);
 
-        JSONObject choice = choices.getJSONObject(0);
-        JSONObject message = choice.getJSONObject("message");
+                // Execute each tool call
+                for (int i = 0; i < pendingToolCalls.length(); i++) {
+                    JSONObject toolCallObj = pendingToolCalls.getJSONObject(i);
+                    String toolCallId = toolCallObj.getString("id");
+                    JSONObject function = toolCallObj.getJSONObject("function");
+                    String functionName = function.getString("name");
+                    JSONObject arguments = new JSONObject(function.getString("arguments"));
 
-        return message.optString("content", "");
+                    // Show tool execution in UI
+                    final String toolName = functionName;
+                    runOnUiThread(() -> {
+                        Message toolMessage = new Message("🔧 Using " + toolName + "...", Message.TYPE_TOOL);
+                        toolMessage.setSessionId(currentSessionId);
+                        messageAdapter.addMessage(toolMessage);
+                        messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+                    });
+
+                    // Execute the tool
+                    ToolResult toolResult = executeTool(functionName, arguments);
+
+                    // Get the content (result or error message)
+                    String toolContent = toolResult.isSuccess()
+                        ? toolResult.getResult()
+                        : toolResult.getError();
+
+                    // Ensure content is never null
+                    if (toolContent == null || toolContent.trim().isEmpty()) {
+                        toolContent = "Tool execution completed with no output.";
+                    }
+
+                    // Add tool result to messages
+                    JSONObject toolResultMessage = new JSONObject();
+                    toolResultMessage.put("role", "tool");
+                    toolResultMessage.put("tool_call_id", toolCallId);
+                    toolResultMessage.put("content", toolContent);
+                    pendingMessages.put(toolResultMessage);
+
+                    // Remove tool execution message from UI
+                    runOnUiThread(() -> {
+                        messageAdapter.removeLastMessage();
+                    });
+                }
+
+                // Make another API call with tool results
+                JSONObject finalResponse = callChatCompletionsAPI(pendingMessages);
+                JSONArray choices = finalResponse.getJSONArray("choices");
+                if (choices.length() == 0) {
+                    throw new Exception("No choices in final response");
+                }
+
+                JSONObject choice = choices.getJSONObject(0);
+                JSONObject responseMessage = choice.getJSONObject("message");
+                String responseText = responseMessage.optString("content", "I completed the action.");
+
+                runOnUiThread(() -> {
+                    // Add agent response
+                    Message agentMessage = new Message(responseText, false);
+                    agentMessage.setSessionId(currentSessionId);
+                    messageAdapter.addMessage(agentMessage);
+                    messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+
+                    // Save agent message to database
+                    executorService.execute(() -> {
+                        long id = dbHelper.insertMessage(agentMessage);
+                        agentMessage.setId(id);
+                    });
+
+                    sendButton.setEnabled(true);
+                });
+
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    // Add error message
+                    Message errorMessage = new Message(getString(R.string.error_api_call, e.getMessage()), false);
+                    errorMessage.setSessionId(currentSessionId);
+                    messageAdapter.addMessage(errorMessage);
+                    messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+
+                    // Save error message to database
+                    executorService.execute(() -> {
+                        long id = dbHelper.insertMessage(errorMessage);
+                        errorMessage.setId(id);
+                    });
+
+                    sendButton.setEnabled(true);
+                });
+            }
+        });
     }
 
     /**
