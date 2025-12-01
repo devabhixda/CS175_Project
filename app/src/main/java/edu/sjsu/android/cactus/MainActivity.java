@@ -85,6 +85,7 @@ public class MainActivity extends AppCompatActivity {
     private JSONArray pendingMessages;
     private JSONObject pendingAssistantMessage;
     private JSONArray pendingToolCalls;
+    private StringBuilder toolResults;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -515,14 +516,21 @@ public class MainActivity extends AppCompatActivity {
                 String response = callOpenAI(userMessageText);
 
                 runOnUiThread(() -> {
+                    android.util.Log.d("CACTUS_API", "sendMessage callback - response: '" + response + "'");
+                    // If response is empty, tool confirmation is already showing
+                    // The typing indicator was already removed in handleToolCalls
+                    // Don't remove anything else or we'll delete the confirmation message!
+                    if (response == null || response.trim().isEmpty()) {
+                        android.util.Log.d("CACTUS_API", "Response is empty - tool confirmation should be showing, not removing anything");
+                        return;
+                    }
+
+                    android.util.Log.d("CACTUS_API", "Response has content, adding agent message");
                     // Remove typing indicator
                     messageAdapter.removeLastMessage();
 
-                    // Add agent response (ensure it's not null or empty)
-                    String responseText = response != null && !response.trim().isEmpty()
-                        ? response
-                        : "I completed the action.";
-                    Message agentMessage = new Message(responseText, false);
+                    // Add agent response
+                    Message agentMessage = new Message(response, false);
                     agentMessage.setSessionId(currentSessionId);
                     messageAdapter.addMessage(agentMessage);
                     messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
@@ -565,6 +573,7 @@ public class MainActivity extends AppCompatActivity {
     private void initializeTools() {
         availableTools.add(new AlarmTool(this));
         availableTools.add(new PhoneCallTool(this));
+        android.util.Log.d("CACTUS_API", "Initialized " + availableTools.size() + " tools");
     }
 
     /**
@@ -576,7 +585,7 @@ public class MainActivity extends AppCompatActivity {
         // Add system message
         JSONObject systemMessage = new JSONObject();
         systemMessage.put("role", "system");
-        systemMessage.put("content", "You are a helpful assistant. Always respond in a friendly and helpful tone. Keep your answers concise and to the point. You have access to tools for setting alarms and making phone calls on the device.");
+        systemMessage.put("content", "You are a helpful assistant. Always respond in a friendly and helpful tone. Keep your answers concise and to the point. You have access to tools for setting alarms and making phone calls on the device. After successfully using a tool, provide a brief confirmation of what action was completed.");
         messages.put(systemMessage);
 
         // Add conversation history from the current session
@@ -623,17 +632,22 @@ public class MainActivity extends AppCompatActivity {
         // Check for tool calls
         if (message.has("tool_calls")) {
             JSONArray toolCalls = message.getJSONArray("tool_calls");
+            android.util.Log.d("CACTUS_API", "Tool calls detected: " + toolCalls.toString());
             return handleToolCalls(messages, message, toolCalls);
         }
 
         // No tool calls, return the response directly
-        return message.optString("content", "");
+        String content = message.optString("content", "");
+        android.util.Log.d("CACTUS_API", "No tool calls. Response content: " + content);
+        return content;
     }
 
     /**
      * Handle tool calls and get final response
      */
     private String handleToolCalls(JSONArray messages, JSONObject assistantMessage, JSONArray toolCalls) throws Exception {
+        android.util.Log.d("CACTUS_API", "handleToolCalls called with " + toolCalls.length() + " tool calls");
+
         // Store pending tool calls for confirmation
         pendingMessages = messages;
         pendingAssistantMessage = assistantMessage;
@@ -645,10 +659,14 @@ public class MainActivity extends AppCompatActivity {
         String functionName = function.getString("name");
         JSONObject arguments = new JSONObject(function.getString("arguments"));
 
+        android.util.Log.d("CACTUS_API", "Tool call: " + functionName + " with args: " + arguments.toString());
+
         // Format the confirmation message
         final String confirmationText = formatToolConfirmation(functionName, arguments);
+        android.util.Log.d("CACTUS_API", "Confirmation text: " + confirmationText);
 
         runOnUiThread(() -> {
+            android.util.Log.d("CACTUS_API", "Removing typing indicator and showing confirmation UI");
             // Remove typing indicator first
             messageAdapter.removeLastMessage();
 
@@ -658,10 +676,12 @@ public class MainActivity extends AppCompatActivity {
             confirmMessage.setToolCallData(toolCallObj);
             messageAdapter.addMessage(confirmMessage);
             messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
+            android.util.Log.d("CACTUS_API", "Tool confirmation UI added to adapter");
         });
 
         // Return empty string to indicate we're waiting for confirmation
         // The actual response will be handled in handleToolConfirmation
+        android.util.Log.d("CACTUS_API", "Returning empty string from handleToolCalls");
         return "";
     }
 
@@ -669,35 +689,49 @@ public class MainActivity extends AppCompatActivity {
      * Format tool call information for confirmation message
      */
     private String formatToolConfirmation(String functionName, JSONObject arguments) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("I want to use: ").append(functionName).append("\n\n");
-
         try {
-            JSONArray names = arguments.names();
-            if (names != null && names.length() > 0) {
-                sb.append("Parameters:\n");
-                for (int i = 0; i < names.length(); i++) {
-                    String key = names.getString(i);
-                    String value = arguments.get(key).toString();
-                    sb.append("• ").append(key).append(": ").append(value).append("\n");
-                }
+            switch (functionName) {
+                case "set_alarm":
+                    int hour = arguments.getInt("hour");
+                    int minutes = arguments.getInt("minutes");
+                    String message = arguments.optString("message", "");
+
+                    // Convert 24h to 12h format
+                    String amPm = hour < 12 ? "AM" : "PM";
+                    int displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+                    String timeStr = String.format("%d:%02d %s", displayHour, minutes, amPm);
+
+                    if (!message.isEmpty() && !message.equals("Alarm")) {
+                        return String.format("Set an alarm for %s\nLabel: %s", timeStr, message);
+                    } else {
+                        return String.format("Set an alarm for %s", timeStr);
+                    }
+
+                case "make_call":
+                    String phoneNumber = arguments.getString("phone_number");
+                    return String.format("Call %s", phoneNumber);
+
+                default:
+                    // Fallback for unknown tools
+                    return String.format("Use %s tool", functionName);
             }
         } catch (Exception e) {
             e.printStackTrace();
+            return "Execute action";
         }
-
-        sb.append("\nDo you want to proceed?");
-        return sb.toString();
     }
 
     /**
      * Handle tool confirmation (Yes/No button click)
      */
     private void handleToolConfirmation(Message message, int position, boolean confirmed) {
+        android.util.Log.d("CACTUS_API", "handleToolConfirmation called - confirmed: " + confirmed);
+
         // Remove the confirmation message
         messageAdapter.removeLastMessage();
 
         if (!confirmed) {
+            android.util.Log.d("CACTUS_API", "User rejected tool call");
             // User rejected the tool call
             Message rejectionMessage = new Message("Tool call cancelled.", false);
             rejectionMessage.setSessionId(currentSessionId);
@@ -714,9 +748,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        android.util.Log.d("CACTUS_API", "User confirmed tool call - starting execution");
+
         // User confirmed - execute the tool calls
         executorService.execute(() -> {
             try {
+                // Initialize tool results storage
+                toolResults = new StringBuilder();
+
                 // Add assistant message with tool calls to history
                 pendingMessages.put(pendingAssistantMessage);
 
@@ -750,6 +789,12 @@ public class MainActivity extends AppCompatActivity {
                         toolContent = "Tool execution completed with no output.";
                     }
 
+                    // Store tool result for fallback display
+                    if (toolResults.length() > 0) {
+                        toolResults.append("\n");
+                    }
+                    toolResults.append(toolContent);
+
                     // Add tool result to messages
                     JSONObject toolResultMessage = new JSONObject();
                     toolResultMessage.put("role", "tool");
@@ -772,11 +817,17 @@ public class MainActivity extends AppCompatActivity {
 
                 JSONObject choice = choices.getJSONObject(0);
                 JSONObject responseMessage = choice.getJSONObject("message");
-                String responseText = responseMessage.optString("content", "I completed the action.");
+                String responseText = responseMessage.optString("content", "");
 
+                // If OpenAI returns empty, use the tool results directly
+                if (responseText == null || responseText.trim().isEmpty()) {
+                    responseText = toolResults.length() > 0 ? toolResults.toString() : "I completed the action.";
+                }
+
+                String finalResponseText = responseText;
                 runOnUiThread(() -> {
                     // Add agent response
-                    Message agentMessage = new Message(responseText, false);
+                    Message agentMessage = new Message(finalResponseText, false);
                     agentMessage.setSessionId(currentSessionId);
                     messageAdapter.addMessage(agentMessage);
                     messagesRecyclerView.scrollToPosition(messageAdapter.getItemCount() - 1);
@@ -848,6 +899,9 @@ public class MainActivity extends AppCompatActivity {
         requestBody.put("tools", tools);
         requestBody.put("tool_choice", "auto");
 
+        // Log request for debugging
+        android.util.Log.d("CACTUS_API", "Request: " + requestBody.toString());
+
         // Send request
         try (OutputStream os = conn.getOutputStream()) {
             byte[] input = requestBody.toString().getBytes("utf-8");
@@ -865,6 +919,9 @@ public class MainActivity extends AppCompatActivity {
                 response.append(inputLine);
             }
             in.close();
+
+            // Log response for debugging
+            android.util.Log.d("CACTUS_API", "Response: " + response.toString());
 
             return new JSONObject(response.toString());
         } else {

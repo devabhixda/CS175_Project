@@ -80,6 +80,29 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
                 holder.toolConfirmationText.setText(message.getContent());
             }
 
+            // Set icon based on tool type
+            if (holder.toolIcon != null && message.getToolCallData() != null) {
+                try {
+                    org.json.JSONObject toolCall = (org.json.JSONObject) message.getToolCallData();
+                    org.json.JSONObject function = toolCall.getJSONObject("function");
+                    String toolName = function.getString("name");
+
+                    switch (toolName) {
+                        case "set_alarm":
+                            holder.toolIcon.setText("⏰");
+                            break;
+                        case "make_call":
+                            holder.toolIcon.setText("📞");
+                            break;
+                        default:
+                            holder.toolIcon.setText("⚡");
+                            break;
+                    }
+                } catch (Exception e) {
+                    holder.toolIcon.setText("⚡");
+                }
+            }
+
             // Set up button click listeners
             if (holder.btnYes != null && holder.btnNo != null && confirmationListener != null) {
                 holder.btnYes.setOnClickListener(v -> {
@@ -161,6 +184,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
     static class MessageViewHolder extends RecyclerView.ViewHolder {
         TextView messageText;
         TextView toolConfirmationText;
+        TextView toolIcon;
         Button btnYes;
         Button btnNo;
 
@@ -168,6 +192,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MessageV
             super(itemView);
             messageText = itemView.findViewById(R.id.messageText);
             toolConfirmationText = itemView.findViewById(R.id.toolConfirmationText);
+            toolIcon = itemView.findViewById(R.id.toolIcon);
             btnYes = itemView.findViewById(R.id.btnYes);
             btnNo = itemView.findViewById(R.id.btnNo);
         }

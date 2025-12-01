@@ -21,20 +21,39 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="12dp"
+            android:padding="16dp"
             android:maxWidth="280dp">
 
-            <TextView
-                android:id="@+id/toolConfirmationText"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textSize="16sp"
-                android:textColor="#212121"
-                android:lineSpacingMultiplier="1.4"
-                android:layout_marginBottom="12dp" />
+                android:orientation="horizontal"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:id="@+id/toolIcon"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:text="⚡"
+                    android:textSize="24sp"
+                    android:gravity="center"
+                    android:background="@drawable/tool_icon_background"
+                    android:layout_marginEnd="12dp" />
+
+                <TextView
+                    android:id="@+id/toolConfirmationText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="15sp"
+                    android:textColor="#212121"
+                    android:lineSpacingMultiplier="1.3"
+                    android:layout_gravity="center_vertical" />
+
+            </LinearLayout>
 
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="end">
@@ -45,11 +64,12 @@
                     android:layout_height="36dp"
                     android:text="No"
                     android:textSize="14sp"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp"
+                    android:textAllCaps="false"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:backgroundTint="#757575"
+                    android:backgroundTint="#E53935"
                     android:layout_marginEnd="8dp"
                     style="@style/Widget.Material3.Button" />
 
@@ -59,8 +79,9 @@
                     android:layout_height="36dp"
                     android:text="Yes"
                     android:textSize="14sp"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="16dp"
+                    android:textAllCaps="false"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
                     android:backgroundTint="#4CAF50"
