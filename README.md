@@ -1,4 +1,4 @@
-# Cactus - A Privacy Focused Chat Tool 
+# Peyote - A Privacy Focused Chat Tool 
 Abhi Jain, Faiz Sameer Ahmed, Kaizen
 ___
 
