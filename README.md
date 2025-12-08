@@ -22,9 +22,13 @@ ___
 
 - Chat with GPT-4o Mini to get information and answers to your questions
 - Uses ChatGPT API to power the chats
-
+<br />
 ### Live Narration Feature
 <img src="./outputs/2.jpeg" alt="Chat with LLM" width="300px"/>
 <img src="./outputs/3.jpeg" alt="Chat with LLM" width="300px"/>
 
 - Uses the mic to live transcode voice to text.
+<br />
+### Set Alarms through Chat
+<img src="./outputs/4.jpeg" alt="Chat with LLM" width="300px"/>
+<img src="./outputs/5.jpeg" alt="Chat with LLM" width="300px"/>
