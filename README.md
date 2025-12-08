@@ -32,3 +32,19 @@ ___
 ### Set Alarms through Chat
 <img src="./outputs/4.jpeg" alt="Chat with LLM" width="300px"/>
 <img src="./outputs/5.jpeg" alt="Chat with LLM" width="300px"/>
+
+- Set alarms directly through the chat interface
+<br />
+
+### Phone Calls
+<img src="./outputs/6.jpeg" alt="Chat with LLM" width="300px"/>
+
+- Can also make phone calls through the app
+
+<br />
+
+### Persistent Sessions
+<img src="./outputs/7.jpeg" alt="Chat with LLM" width="300px"/>
+
+- Refer to previous conversations and continue from there.
+- Start new conversations and keep the context separated.
