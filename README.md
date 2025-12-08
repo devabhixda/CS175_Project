@@ -10,7 +10,6 @@ ___
 ## Hardware Requirements
 - **Android Device:** Android 7.0 (API 24) or higher
 - **RAM:** Minimum 2GB, recommended 4GB or more for optimal performance
-- **Storage:** At least 50MB free space for app installation
 - **Network:** Active internet connection required
 - **Permissions Required:**
   - Microphone access (for voice input)
