@@ -17,6 +17,15 @@ ___
   - Alarm permissions (for alarm setting functionality)
 
 ## User Guide
+
+### Set Your API Key
+<img src="./outputs/8.jpg" alt="API Key Setup" width="300px"/>
+
+- On first launch, you'll be prompted to enter your OpenAI API key
+- Your key is stored securely on your device and never sent anywhere except OpenAI
+- Get your API key at [platform.openai.com](https://platform.openai.com)
+<br />
+
 ### Chat with the LLM
 <img src="./outputs/1.jpeg" alt="Chat with LLM" width="300px"/>
 
