@@ -180,6 +180,17 @@
                 android:paddingEnd="8dp"
                 android:clipToPadding="false" />
 
+            <!-- Settings Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/settingsButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="16dp"
+                android:text="@string/change_api_key"
+                app:icon="@android:drawable/ic_menu_preferences"
+                app:iconGravity="start"
+                style="@style/Widget.Material3.Button.TextButton" />
+
         </LinearLayout>
     </com.google.android.material.navigation.NavigationView>
 

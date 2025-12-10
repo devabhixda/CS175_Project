@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,6 +18,7 @@ import android.widget.ImageButton;
 import android.widget.Toast;
 
 import androidx.appcompat.app.ActionBarDrawerToggle;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
@@ -33,6 +35,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.navigation.NavigationView;
+import com.google.android.material.textfield.TextInputEditText;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -51,14 +54,17 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int PERMISSION_REQUEST_CODE = 100;
 
-    // OpenAI API configuration (API key is stored in local.properties)
-    private static final String OPENAI_API_KEY = BuildConfig.OPENAI_API_KEY;
+    // OpenAI API configuration
     private static final String OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+
+    // API Key Manager for secure storage
+    private ApiKeyManager apiKeyManager;
 
     // Tools
     private final List<BaseTool> availableTools = new ArrayList<>();
 
     private DrawerLayout drawerLayout;
+    private MaterialButton settingsButton;
     private ActionBarDrawerToggle drawerToggle;
     private RecyclerView messagesRecyclerView;
     private RecyclerView sessionsRecyclerView;
@@ -156,6 +162,9 @@ public class MainActivity extends AppCompatActivity {
         // Initialize executor service for background tasks
         executorService = Executors.newSingleThreadExecutor();
 
+        // Initialize API key manager
+        apiKeyManager = new ApiKeyManager(this);
+
         // Initialize database
         dbHelper = new ChatDatabaseHelper(this);
 
@@ -218,6 +227,13 @@ public class MainActivity extends AppCompatActivity {
         // Set up new chat button
         newChatButton.setOnClickListener(v -> createNewSession());
 
+        // Set up settings button
+        settingsButton = findViewById(R.id.settingsButton);
+        settingsButton.setOnClickListener(v -> {
+            drawerLayout.closeDrawer(GravityCompat.START);
+            showApiKeyDialog(false);
+        });
+
         // Set up button listeners
         micButton.setOnClickListener(v -> handleMicButtonClick());
         sendButton.setOnClickListener(v -> handleSendButtonClick());
@@ -236,6 +252,11 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize Speech Recognizer
         initializeSpeechRecognizer();
+
+        // Check for API key and prompt if not set
+        if (!apiKeyManager.hasApiKey()) {
+            showApiKeyDialog(true);
+        }
     }
 
     private void checkPermissions() {
@@ -877,11 +898,16 @@ public class MainActivity extends AppCompatActivity {
      * Call OpenAI Chat Completions API
      */
     private JSONObject callChatCompletionsAPI(JSONArray messages) throws Exception {
+        String apiKey = apiKeyManager.getApiKey();
+        if (apiKey == null || apiKey.isEmpty()) {
+            throw new Exception("API key not configured. Please set your OpenAI API key in settings.");
+        }
+
         URL url = new URL(OPENAI_API_URL);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
-        conn.setRequestProperty("Authorization", "Bearer " + OPENAI_API_KEY);
+        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
         conn.setDoOutput(true);
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(30000);
@@ -939,6 +965,50 @@ public class MainActivity extends AppCompatActivity {
             System.out.println(errorMessage);
             throw new Exception(errorMessage);
         }
+    }
+
+    /**
+     * Show dialog to enter or change API key.
+     * @param required If true, the dialog cannot be dismissed without entering a key.
+     */
+    private void showApiKeyDialog(boolean required) {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_api_key, null);
+        TextInputEditText apiKeyInput = dialogView.findViewById(R.id.apiKeyInput);
+
+        // Pre-fill with existing key if available
+        String existingKey = apiKeyManager.getApiKey();
+        if (existingKey != null && !existingKey.isEmpty()) {
+            apiKeyInput.setText(existingKey);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(R.string.api_key_dialog_title)
+                .setView(dialogView)
+                .setPositiveButton(android.R.string.ok, null); // Set to null initially to prevent auto-dismiss
+
+        if (!required) {
+            builder.setNegativeButton(android.R.string.cancel, null);
+        }
+
+        builder.setCancelable(!required);
+
+        AlertDialog dialog = builder.create();
+
+        dialog.setOnShowListener(dialogInterface -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String apiKey = apiKeyInput.getText() != null ? apiKeyInput.getText().toString().trim() : "";
+
+                if (ApiKeyManager.isValidApiKeyFormat(apiKey)) {
+                    apiKeyManager.saveApiKey(apiKey);
+                    Toast.makeText(this, R.string.api_key_saved, Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                } else {
+                    Toast.makeText(this, R.string.api_key_invalid, Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
+
+        dialog.show();
     }
 
     @Override
