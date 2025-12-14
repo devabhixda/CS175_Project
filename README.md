@@ -1,5 +1,5 @@
 # Peyote - A Chat Interface with Access to the phone
-Abhi Jain, Faiz Sameer Ahmed, Kaizen
+Abhi Jain, Faiz Sameer Ahmed, Kaizan Satta
 ___
 
 ## Resources
